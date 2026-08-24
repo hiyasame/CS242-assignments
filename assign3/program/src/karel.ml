@@ -50,11 +50,11 @@ let main () =
       and n = flag "n" (optional_with_default 6 int) ~doc:"height"
       in
       fun () ->
-        if problem = "problem1" then run_problem1 ()
-        else if problem = "problem3" then run_problem3 m n
+        if Poly.(problem = "problem1") then run_problem1 ()
+        else if Poly.(problem = "problem3") then run_problem3 m n
         else Printf.printf "Error: first argument must be 'problem1' or 'problem3'"
     ]
-  |> Command.run
+  |> Command_unix.run
 
 
 

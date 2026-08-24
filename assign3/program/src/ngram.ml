@@ -37,6 +37,6 @@ let main () =
       and nwords = flag "nwords" (optional_with_default 20 int) ~doc:"Number of words to generate" in
       fun () -> run filepath ngram nwords
     ]
-  |> Command.run
+  |> Command_unix.run
 
 let () = main ()

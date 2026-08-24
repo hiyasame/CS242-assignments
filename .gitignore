@@ -1,1 +1,47 @@
 .DS_Store
+
+# Editor files
+.idea/
+.vscode/
+*.swp
+*~
+
+# OCaml build products
+_build/
+*.annot
+*.byte
+*.cma
+*.cmi
+*.cmo
+*.cmt
+*.cmti
+*.cmx
+*.cmxa
+*.native
+*.o
+*.top
+
+# Rust build products
+target/
+
+# LaTeX build products
+_minted-*/
+*.aux
+*.bbl
+*.bcf
+*.blg
+*.fdb_latexmk
+*.fls
+*.log
+*.nav
+*.out
+*.pdf
+*.run.xml
+*.snm
+*.synctex.gz
+*.toc
+*.vrb
+*.xdv
+
+# Generated submission archives
+assign*.zip
