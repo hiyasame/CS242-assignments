@@ -1,5 +1,6 @@
-open Flags
+open Flags_util
 open Core
+open Poly
 open Ast
 
 type outcome =

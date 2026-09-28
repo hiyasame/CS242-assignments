@@ -1,4 +1,4 @@
-open Flags
+open Flags_util
 open Core
 open Result.Monad_infix
 open Ast
@@ -34,6 +34,6 @@ let main () =
         set_testing testing;
         run filepath
     ]
-  |> Command.run
+  |> Command_unix.run
 
 let () = main ()

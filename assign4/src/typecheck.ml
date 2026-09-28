@@ -1,5 +1,6 @@
-open Flags
+open Flags_util
 open Core
+open Poly
 open Result.Monad_infix
 open Ast
 
@@ -22,7 +23,71 @@ let rec typecheck_expr (ctx : Type.t String.Map.t) (e : Expr.t)
          (Expr.to_string right) (Type.to_string tau_right)))
 
   (* Add more cases here! *)
-
+  | Expr.True -> Ok Type.Bool
+  | Expr.False -> Ok Type.Bool
+  | Expr.If {cond; then_; else_} ->
+    typecheck_expr ctx cond >>= fun tau_cond ->
+    typecheck_expr ctx then_ >>= fun tau_then ->
+    typecheck_expr ctx else_ >>= fun tau_else ->
+    (match tau_cond with
+     | Type.Bool ->
+       if Ast_util.Type.aequiv tau_then tau_else
+       then Ok tau_then
+       else Error (Printf.sprintf
+         "Then branch %s has type %s, not matching else branch type %s of type %s"
+         (Expr.to_string then_) (Type.to_string tau_then)
+         (Expr.to_string else_) (Type.to_string tau_else))
+     | _ -> Error (Printf.sprintf
+         "If condition expression %s has type %s, expected bool"
+         (Expr.to_string cond) (Type.to_string tau_cond)))
+  | Expr.Relop {relop = _; left; right} ->
+    typecheck_expr ctx left >>= fun tau_left ->
+    typecheck_expr ctx right >>= fun tau_right ->
+    (match (tau_left, tau_right) with
+     | (Type.Num, Type.Num) -> Ok Type.Bool
+     | _ -> Error (Printf.sprintf
+        "Relop operands have incompatible types: (%s : %s) and (%s : %s)"
+        (Expr.to_string left) (Type.to_string tau_left)
+        (Expr.to_string right) (Type.to_string tau_right)))
+  | Expr.And {left; right} ->
+    typecheck_expr ctx left >>= fun tau_left ->
+    typecheck_expr ctx right >>= fun tau_right ->
+    (match (tau_left, tau_right) with
+     | (Type.Bool, Type.Bool) -> Ok Type.Bool
+     | _ -> Error (Printf.sprintf
+        "Logical operands have incompatible types: (%s : %s) and (%s : %s)"
+        (Expr.to_string left) (Type.to_string tau_left)
+        (Expr.to_string right) (Type.to_string tau_right)))
+  | Expr.Or {left; right} ->
+    typecheck_expr ctx left >>= fun tau_left ->
+    typecheck_expr ctx right >>= fun tau_right ->
+    (match (tau_left, tau_right) with
+     | (Type.Bool, Type.Bool) -> Ok Type.Bool
+     | _ -> Error (Printf.sprintf
+        "Logical operands have incompatible types: (%s : %s) and (%s : %s)"
+        (Expr.to_string left) (Type.to_string tau_left)
+        (Expr.to_string right) (Type.to_string tau_right)))
+  | Expr.Var var ->
+    (match Map.find ctx var with
+     | Some tau -> Ok tau
+     | None -> Error (Printf.sprintf "Unbound variable %s" var))
+  | Expr.Lam {x; tau; e} ->
+    typecheck_expr (Map.set ctx ~key:x ~data:tau) e
+      >>= fun ret -> Ok (Type.Fn {arg = tau; ret})
+  | Expr.App {lam; arg} ->
+    typecheck_expr ctx arg >>= fun arg_t ->
+    typecheck_expr ctx lam >>= fun lam_t ->
+    (match lam_t with
+     | Type.Fn {arg = tau_arg; ret} ->
+       if Ast_util.Type.aequiv tau_arg arg_t
+       then Ok ret
+       else Error (Printf.sprintf
+         "Attempted to call function %s of expected argument type %s with argument expression %s of actual type %s"
+         (Expr.to_string lam) (Type.to_string tau_arg)
+         (Expr.to_string arg)   (Type.to_string arg_t))
+     | _ -> Error (Printf.sprintf
+         "Attempted to call expression %s of non-function type %s as a function"
+         (Expr.to_string lam) (Type.to_string lam_t)))
   | _ -> raise Unimplemented
 
 let typecheck t = typecheck_expr String.Map.empty t
