@@ -4,8 +4,6 @@ open Poly
 open Result.Monad_infix
 open Ast
 
-exception Unimplemented
-
 let rec typecheck_expr (ctx : Type.t String.Map.t) (e : Expr.t)
   : (Type.t, string) Result.t =
   match e with
@@ -88,7 +86,118 @@ let rec typecheck_expr (ctx : Type.t String.Map.t) (e : Expr.t)
      | _ -> Error (Printf.sprintf
          "Attempted to call expression %s of non-function type %s as a function"
          (Expr.to_string lam) (Type.to_string lam_t)))
-  | _ -> raise Unimplemented
+  | Expr.Unit -> Ok Type.Unit
+  | Expr.Pair {left; right} ->
+    typecheck_expr ctx left >>= fun left_t ->
+    typecheck_expr ctx right >>= fun right_t ->
+        Ok (Type.Product { left = left_t; right= right_t })
+  | Expr.Project {e; d} ->
+    typecheck_expr ctx e >>= fun tau_e ->
+    (match tau_e with
+     | Type.Product {left; right} ->
+       (match d with
+        | Expr.Left -> Ok left
+        | Expr.Right -> Ok right)
+     | _ -> Error (Printf.sprintf
+         "Attempted to project (.%s) from expression %s of non-product type %s"
+         (match d with Expr.Left -> "L" | Expr.Right -> "R")
+         (Expr.to_string e) (Type.to_string tau_e)))
+  | Expr.Inject {e; d; tau} ->
+     typecheck_expr ctx e >>= fun tau_e ->
+        (match tau with
+            | Type.Sum {left; right} ->
+                let expected = (match d with Expr.Left -> left | Expr.Right -> right) in
+                   if Ast_util.Type.aequiv tau_e expected
+                   then Ok tau
+                   else Error (Printf.sprintf
+                                 "Inject (%s = %s as %s): expression %s has type %s, but the %s side of %s is %s"
+                                 (Expr.to_string e)
+                                 (match d with Expr.Left -> "L" | Expr.Right -> "R")
+                                 (Type.to_string tau)
+                                 (Expr.to_string e) (Type.to_string tau_e)
+                                 (match d with Expr.Left -> "left" | Expr.Right -> "right")
+                                 (Type.to_string tau) (Type.to_string expected))
+            | _ -> Error (Printf.sprintf
+                     "Inject annotation %s is not a sum type" (Type.to_string tau))
+        )
+  | Expr.Case {e; xleft; eleft; xright; eright;} ->
+     typecheck_expr ctx e >>= fun tau_e ->
+         (match tau_e with
+             | Type.Sum {left; right} ->
+               typecheck_expr (Map.set ctx ~key:xleft ~data:left) eleft >>= fun tau_left ->
+               typecheck_expr (Map.set ctx ~key:xright ~data:right) eright >>= fun tau_right ->
+               if Ast_util.Type.aequiv tau_left tau_right
+               then Ok tau_left
+               else Error (Printf.sprintf
+                 "Case branches have different types: %s has type %s, but %s has type %s"
+                 (Expr.to_string eleft) (Type.to_string tau_left)
+                 (Expr.to_string eright) (Type.to_string tau_right))
+             | _ -> Error (Printf.sprintf
+                 "Case scrutinee %s has non-sum type %s"
+                 (Expr.to_string e) (Type.to_string tau_e)))
+  | Expr.Fix {x; tau; e} ->
+     typecheck_expr (Map.set ctx ~key:x ~data:tau) e >>= fun tau_e ->
+        if Ast_util.Type.aequiv tau_e tau
+        then Ok tau
+        else Error (Printf.sprintf
+           "Fixpoint (%s : %s) has body %s of type %s, which does not match the annotation"
+           x (Type.to_string tau) (Expr.to_string e) (Type.to_string tau_e))
+  | Expr.TyLam {a; e} ->
+    typecheck_expr ctx e >>= fun tau_e ->
+    Ok (Type.Forall {a; tau = tau_e})
+  | Expr.TyApp {e; tau} ->
+    typecheck_expr ctx e >>= fun tau_e ->
+    (match tau_e with
+     | Type.Forall {a; tau = tau_body} ->
+       Ok (Ast_util.Type.substitute a tau tau_body)
+     | _ -> Error (Printf.sprintf
+         "Attempted to apply a type to expression %s of non-universal type %s"
+         (Expr.to_string e) (Type.to_string tau_e)))
+  | Expr.Fold_ {e; tau} ->
+    (match tau with
+     | Type.Rec {a; tau = tau_body} ->
+       let unfolded = Ast_util.Type.substitute a tau tau_body in
+       typecheck_expr ctx e >>= fun tau_e ->
+       if Ast_util.Type.aequiv tau_e unfolded
+       then Ok tau
+       else Error (Printf.sprintf
+         "Fold of %s has type %s, but %s unfolds to %s"
+         (Expr.to_string e) (Type.to_string tau_e)
+         (Type.to_string tau) (Type.to_string unfolded))
+     | _ -> Error (Printf.sprintf
+         "Fold annotation %s is not a recursive type" (Type.to_string tau)))
+  | Expr.Unfold e ->
+    typecheck_expr ctx e >>= fun tau_e ->
+    (match tau_e with
+     | Type.Rec {a; tau} -> Ok (Ast_util.Type.substitute a tau_e tau)
+     | _ -> Error (Printf.sprintf
+         "Attempted to unfold expression %s of non-recursive type %s"
+         (Expr.to_string e) (Type.to_string tau_e)))
+  | Expr.Export {e; tau_adt; tau_mod} ->
+    (match tau_mod with
+     | Type.Exists {a; tau = rho} ->
+       let hidden = Ast_util.Type.substitute a tau_adt rho in
+       typecheck_expr ctx e >>= fun tau_e ->
+       if Ast_util.Type.aequiv tau_e hidden
+       then Ok tau_mod
+       else Error (Printf.sprintf
+         "Export of %s has type %s, but hiding %s in %s expects %s"
+         (Expr.to_string e) (Type.to_string tau_e)
+         (Type.to_string tau_adt) (Type.to_string tau_mod)
+         (Type.to_string hidden))
+     | _ -> Error (Printf.sprintf
+         "Export annotation %s is not an existential type"
+         (Type.to_string tau_mod)))
+  | Expr.Import {x; a; e_mod; e_body} ->
+    typecheck_expr ctx e_mod >>= fun tau_mod ->
+    (match tau_mod with
+     | Type.Exists {a = a_mod; tau = rho} ->
+       (* The abstract type is named [a] inside the body. *)
+       let rho' = Ast_util.Type.substitute a_mod (Type.Var a) rho in
+       typecheck_expr (Map.set ctx ~key:x ~data:rho') e_body
+     | _ -> Error (Printf.sprintf
+         "Imported expression %s has non-existential type %s"
+         (Expr.to_string e_mod) (Type.to_string tau_mod)))
 
 let typecheck t = typecheck_expr String.Map.empty t
 

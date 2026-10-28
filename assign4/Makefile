@@ -1,5 +1,8 @@
 all: main.native
 debug: main.byte
+test: always
+	$(BUILD) $(FLAGS) -I src tests/interpreter_tests.native
+	./interpreter_tests.native
 
 BUILD = corebuild
 # Force Apple's clang: Homebrew's llvm clang cannot link -lpthread on this SDK.
@@ -17,4 +20,4 @@ clean:
 
 always:
 
-.PHONY: always
+.PHONY: always test
